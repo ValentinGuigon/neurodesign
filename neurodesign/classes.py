@@ -173,25 +173,33 @@ class Design:
         else:
             ITIli = np.array(self.ITI) + self.experiment.trial_duration
             self.onsets = np.cumsum(ITIli) - self.experiment.trial_duration
-        stimonsets = [x + self.experiment.t_pre for x in self.onsets]
+        #stimonsets = [x + self.experiment.t_pre for x in self.onsets]
+        stimonsets = [x + t_pre_i for x, t_pre_i in zip(self.onsets, self.experiment.t_pre)] # modified to accomodate use of vectors
 
         # round onsets to resolution
         self.ITI, x = _round_to_resolution(self.ITI, self.experiment.resolution)
         onsetX, XindStim = _round_to_resolution(stimonsets, self.experiment.resolution)
-        stim_duration_tp = int(self.experiment.stim_duration / self.experiment.resolution)
+        #stim_duration_tp = int(self.experiment.stim_duration / self.experiment.resolution)
+        stim_duration_tp = (np.array(self.experiment.stim_duration) / self.experiment.resolution).astype(int) # modified for vector support
 
         # find indices in resolution scale of stimuli
         assert np.max(XindStim) <= self.experiment.n_tp
-        assert np.max(XindStim) + stim_duration_tp <= self.experiment.n_tp
+        #assert np.max(XindStim) + stim_duration_tp <= self.experiment.n_tp
+        assert np.all(XindStim + stim_duration_tp <= self.experiment.n_tp) # modified for vector support
 
         # create design matrix in resolution scale (=deltasM in Kao toolbox)
         X_X = np.zeros([self.experiment.n_tp, self.experiment.n_stimuli])
 
-        for stimulus in range(self.experiment.n_stimuli):
-            for dur in range(stim_duration_tp):
-                X_X[np.array(XindStim) + dur, int(stimulus)] = [
-                    1 if z == stimulus else 0 for z in self.order
-                ]
+        #for stimulus in range(self.experiment.n_stimuli):
+        #    for dur in range(stim_duration_tp):
+        #        X_X[np.array(XindStim) + dur, int(stimulus)] = [
+        #            1 if z == stimulus else 0 for z in self.order
+        #        ]
+
+        for i, (stim, onset_idx, dur_tp) in enumerate(zip(self.order, XindStim, stim_duration_tp)):
+            # For each trial, fill in the design matrix for the appropriate stimulus and duration
+            X_X[onset_idx:onset_idx+dur_tp, stim] = 1
+
 
         # deconvolved matrix in resolution units
         deconvM = np.zeros(
@@ -478,6 +486,25 @@ class Experiment:
         self.FcMax = FcMax
         self.FfMax = FfMax
 
+        # introduced possibility for t_pre and t_post to be passed as vectors
+        if np.isscalar(t_pre):
+            self.t_pre = np.full(n_trials, t_pre)
+        else:
+            self.t_pre = np.array(t_pre)
+            assert len(self.t_pre) == n_trials
+        if np.isscalar(t_post):
+            self.t_post = np.full(n_trials, t_post)
+        else:
+            self.t_post = np.array(t_post)
+            assert len(self.t_post) == n_trials
+
+        # introduced possibility for duration to be passed as a vector
+        if np.isscalar(stim_duration):
+            self.stim_duration = np.full(n_trials, stim_duration)
+        else:
+            self.stim_duration = np.array(stim_duration)
+            assert len(self.stim_duration) == n_trials
+
         # make sure resolution is a divisor of TR (up to )
         if not np.isclose(self.TR % self.resolution, 0):
             self.resolution = _find_new_resolution(self.TR, self.resolution)
@@ -517,7 +544,8 @@ class Experiment:
             self.n_trials = self._compute_n_trials()
         else:
             ITIdur = self.n_trials * self.ITImean
-            TRIALdur = self.n_trials * self.trial_duration
+            #TRIALdur = self.n_trials * self.trial_duration
+            TRIALdur = np.sum(self.trial_duration) # changed to accomodate introduction of vectors support
             duration = ITIdur + TRIALdur
             if self.restnum > 0:
                 duration = duration + (
